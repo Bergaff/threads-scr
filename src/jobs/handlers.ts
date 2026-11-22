@@ -19,6 +19,26 @@ import { buildTgCaption } from "../bot/telegram.js";
 import { TelegramClient } from "../bot/telegram.js";
 import { publishToTelegram } from "../publish/telegram.js";
 import { buildYoutubeMeta } from "../publish/youtube.js";
+import { buildContainerFetchRequest, buildRenderRequest, parseContainerFetchResponse } from "../lib/containerApi.js";
+
+/** Вызов контейнера (PROXY/RENDERER) из Worker'а. */
+async function callContainer(
+  ns: DurableObjectNamespace | undefined,
+  name: string,
+  path: string,
+  body: unknown,
+): Promise<unknown> {
+  if (!ns) throw new Error(`container ${name} not bound`);
+  const stub = ns.getByName("main");
+  const res = await stub.fetch(new Request(`http://container${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }));
+  const data = (await res.json()) as Record<string, unknown>;
+  if (!res.ok) throw new Error(`container ${name} ${path}: ${String(data.error ?? res.status)}`);
+  return data;
+}
 
 async function loadAccount(env: Env, accountId?: string): Promise<CollectorAccount | null> {
   const row = accountId
@@ -62,7 +82,18 @@ async function pauseAccount(env: Env, accountId: string, err: CollectorError): P
 
 async function collect(env: Env, account: CollectorAccount, url: string, source: string): Promise<void> {
   try {
-    const { json, body } = await collectorFetch(account, url, { gatewayUrl: env.PROXY_GATEWAY_URL || undefined });
+    // Приоритет: контейнер-шлюз (per-account прокси) → внешний шлюз → прямой fetch.
+    const viaContainer = env.PROXY
+      ? async (u: string, headers: Record<string, string>, proxyUrl?: string) => {
+          const data = await callContainer(env.PROXY, "proxy", "/fetch", buildContainerFetchRequest(account, u, proxyUrl));
+          return parseContainerFetchResponse(data);
+        }
+      : undefined;
+    const { json, body } = await collectorFetch(account, url, {
+      gatewayUrl: env.PROXY_GATEWAY_URL || undefined,
+      viaContainer,
+      proxyUrl: account.proxy,
+    });
     const payload = json ?? body;
     const posts = typeof payload === "string" ? [] : parseThreadsPayload(payload);
     for (const p of posts) {
@@ -266,7 +297,42 @@ async function renderShorts(env: Env, contentId: string): Promise<void> {
   const script = JSON.parse(String(item.script)) as ReturnType<typeof buildScript>;
   const ass = segmentsToAss(script.segments);
   await env.MEDIA.put(`shorts/${contentId}.ass`, ass, { httpMetadata: { contentType: "text/plain" } });
-  // Сборка mp4 — внешний рендерер (ffmpeg вне Workers). Worker шлёт ему сценарий + ассеты.
+
+  const lang = String(item.channel).endsWith("_ru") ? "ru" : "en";
+  const cardKey = String(item.card_path ?? `cards/${contentId}.svg`);
+  // Фон и музыка: ротация по дню (без повтора 5 роликов подряд — упрощённо).
+  const day = Math.floor(Date.now() / 86_400_000);
+  const backgroundKey = `assets/backgrounds/bg-${day % 10}.mp4`;
+  const musicKey = `assets/music/track-${day % 10}.mp3`;
+
+  // Путь 1: Cloudflare Container (ffmpeg + Piper TTS внутри).
+  if (env.RENDERER && env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY) {
+    try {
+      const data = (await callContainer(env.RENDERER, "renderer", "/render", buildRenderRequest({
+        contentId,
+        segments: script.segments,
+        cardKey,
+        backgroundKey,
+        musicKey,
+        lang,
+        r2: {
+          accountId: env.R2_ACCOUNT_ID,
+          bucket: env.R2_BUCKET ?? "threads-digest-media",
+          accessKeyId: env.R2_ACCESS_KEY_ID,
+          secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+        },
+      }))) as { videoKey?: string; previewKey?: string; durationSec?: number };
+      await env.DB.prepare(
+        "UPDATE content_items SET video_path = ?, preview_path = ?, updated_at = datetime('now') WHERE id = ?",
+      ).bind(data.videoKey ?? "", data.previewKey ?? "", contentId).run();
+      await log(env.DB, "info", `Shorts rendered: ${data.videoKey} (${data.durationSec}s)`);
+      return;
+    } catch (err) {
+      await log(env.DB, "error", `Container render failed for ${contentId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Путь 2: внешний рендерер по VIDEO_RENDERER_URL (VPS/Fly.io с ffmpeg).
   if (env.VIDEO_RENDERER_URL) {
     await fetch(env.VIDEO_RENDERER_URL, {
       method: "POST",
@@ -274,7 +340,7 @@ async function renderShorts(env: Env, contentId: string): Promise<void> {
       body: JSON.stringify({ contentId, script, assKey: `shorts/${contentId}.ass` }),
     }).catch(() => {});
   }
-  await log(env.DB, "info", `Shorts assets ready for ${contentId} (render via external renderer)`);
+  await log(env.DB, "info", `Shorts assets ready for ${contentId} (ASS in R2, mp4 via external renderer)`);
 }
 
 async function publish(env: Env, contentId: string, payload?: Record<string, unknown>): Promise<void> {

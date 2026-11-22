@@ -12,3 +12,7 @@ OPENAI_BASE_URL="https://api.openai.com/v1"
 YOUTUBE_OAUTH_TOKEN_RU=""
 YOUTUBE_OAUTH_TOKEN_EN=""
 COOKIE_ENCRYPTION_KEY=""
+# R2 S3-ключи для контейнера-рендерера (Dashboard → R2 → Manage R2 API Tokens)
+R2_ACCOUNT_ID=""
+R2_ACCESS_KEY_ID=""
+R2_SECRET_ACCESS_KEY=""

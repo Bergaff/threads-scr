@@ -7,6 +7,10 @@ export interface Env {
   MEDIA: R2Bucket;
   JOBS: Queue<JobMessage>;
   AI: Ai;
+  // Cloudflare Containers (см. src/containers.ts). Опционально: без них
+  // рендер Shorts и прокси-шлюз работают через VIDEO_RENDERER_URL / PROXY_GATEWAY_URL.
+  RENDERER?: DurableObjectNamespace;
+  PROXY?: DurableObjectNamespace;
   ENVIRONMENT: string;
   SITE_URL: string;
   BOT_USERNAME: string;
@@ -28,6 +32,11 @@ export interface Env {
   YOUTUBE_OAUTH_TOKEN_EN?: string;
   ADMIN_API_KEY?: string;
   COOKIE_ENCRYPTION_KEY?: string; // base64, 32 байта
+  // R2 S3-ключи для контейнера-рендерера (контейнер ходит в R2 напрямую).
+  R2_ACCOUNT_ID?: string;
+  R2_ACCESS_KEY_ID?: string;
+  R2_SECRET_ACCESS_KEY?: string;
+  R2_BUCKET?: string;
 }
 
 export interface JobMessage {

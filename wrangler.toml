@@ -1,6 +1,6 @@
 name = "threads-digest"
 main = "src/index.ts"
-compatibility_date = "2024-11-06"
+compatibility_date = "2025-09-01"
 
 # ── Cron: планировщик (раздел 4.8 ТЗ) ──────────────────────────────────────
 # Workers Cron: минимум 1 раз в минуту. Тяжёлые задачи уходят в Queue.
@@ -33,6 +33,32 @@ max_batch_timeout = 30
 [ai]
 binding = "AI"
 
+# ── Containers: ffmpeg-рендерер Shorts + прокси-шлюз (один образ, две роли) ──
+# Требуют Workers Paid ($5/мес). Масштаб в ноль при простое — см. docs/COST.md.
+[[containers]]
+name = "renderer"
+image = "./containers/renderer/Dockerfile"
+instance_type = "standard-2"
+class_name = "RendererContainer"
+
+[[containers]]
+name = "proxy"
+image = "./containers/renderer/Dockerfile"
+instance_type = "basic"
+class_name = "ProxyContainer"
+
+[[durable_objects.bindings]]
+name = "RENDERER"
+class_name = "RendererContainer"
+
+[[durable_objects.bindings]]
+name = "PROXY"
+class_name = "ProxyContainer"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RendererContainer", "ProxyContainer"]
+
 # ── Переменные (секреты — только через `wrangler secret put`, см. .dev.vars.example) ──
 [vars]
 ENVIRONMENT = "production"
@@ -41,12 +67,12 @@ BOT_USERNAME = "threadsreaderbot"
 # Провайдеры: "workers-ai" | "openai-compatible" | "mock"
 LLM_PROVIDER = "workers-ai"
 LLM_MODEL = "@cf/meta/llama-3.1-8b-instruct"
-TTS_PROVIDER = "mock"
-# Рендер Shorts: Workers не умеет ffmpeg — внешний рендерер (см. docs/ARCHITECTURE.md)
+# TTS: "piper" (в контейнере, бесплатно) | "mock" | внешний API
+TTS_PROVIDER = "piper"
+# Запасные пути, если Containers недоступны: внешний рендерер / HTTP-шлюз.
 VIDEO_RENDERER_URL = ""
-# Прокси-шлюз для сборщика: Workers fetch не поддерживает per-request proxy,
-# поэтому запросы идут через HTTP-шлюз с привязкой аккаунт→IP (см. docs/ARCHITECTURE.md)
 PROXY_GATEWAY_URL = ""
+R2_BUCKET = "threads-digest-media"
 
 [observability]
 enabled = true

@@ -23,17 +23,19 @@
 ## Что НЕ работает в Workers и как решается
 
 ### 1. Per-account proxy (4.1)
-Workers `fetch` не умеет ходить через прокси. Решение: **HTTP-шлюз**
-(`PROXY_GATEWAY_URL`) — маленький сервис (напр. на Fly.io / VPS / другом Worker'е
-с `fetch` через прокси), который принимает `POST /fetch?url=...` + заголовок
-`X-Account-Id` и выполняет запрос с привязанного IP. Привязка «аккаунт ↔ прокси»
-живёт в шлюзе. Без шлюза запросы идут напрямую (только для локальной разработки).
+Workers `fetch` не умеет ходить через прокси. Решение — **Cloudflare Containers**:
+контейнер `PROXY` (binding `env.PROXY`) принимает `POST /fetch` и ходит через
+per-account прокси (`account.proxy`, привязка аккаунт↔IP навсегда). Масштаб в ноль —
+плата только за секунды работы (см. `docs/COST.md`). Фолбэк: внешний HTTP-шлюз
+(`PROXY_GATEWAY_URL`).
 
 ### 2. ffmpeg / монтаж Shorts (7.6)
-В Workers нет ffmpeg и долгих CPU-задач. Решение: **внешний рендерер**.
-Worker готовит сценарий, субтитры ASS, карточки и кладёт в R2, затем
-`POST VIDEO_RENDERER_URL` с JSON `{contentId, script, assKey}`.
-Рендерер (контейнер с ffmpeg или Remotion) собирает mp4 и кладёт обратно в R2.
+В Workers нет ffmpeg и долгих CPU-задач. Решение — **Cloudflare Containers**:
+контейнер `RENDERER` (binding `env.RENDERER`, `standard-2`) держит ffmpeg + Piper TTS
+(офлайн, без API-оплат). Код контейнера — `containers/renderer/server.js` (один образ
+на две роли). Worker кладёт SVG-карточку, фон и музыку в R2, шлёт `POST /render` с
+сегментами сценария → контейнер собирает mp4 + karaoke-субтитры + loudnorm −14 LUFS
+и кладёт результат обратно в R2. Фолбэк: внешний рендерер (`VIDEO_RENDERER_URL`).
 Пока рендерер не подключён, ролик можно скачать из бота-редактора (⬇️) и загрузить вручную —
 это и есть режим «до аудита Google» из раздела 7.7.
 
