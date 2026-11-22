@@ -12,7 +12,12 @@ OPENAI_BASE_URL="https://api.openai.com/v1"
 YOUTUBE_OAUTH_TOKEN_RU=""
 YOUTUBE_OAUTH_TOKEN_EN=""
 COOKIE_ENCRYPTION_KEY=""
-# R2 S3-ключи для контейнера-рендерера (Dashboard → R2 → Manage R2 API Tokens)
+# Рендер Shorts и прокси крутятся локально на ПК (см. local/), не в Cloudflare-контейнерах.
+# Worker дёргает локальный сервис по туннелю (cloudflared/ngrok):
+VIDEO_RENDERER_URL="https://xyz.trycloudflare.com"
+PROXY_GATEWAY_URL="https://xyz.trycloudflare.com"
+# R2 S3-ключи: нужны локальному рендереру (local/.env) для чтения/записи в R2.
+# Можно задать здесь (тогда Worker передаст их в теле /render) либо напрямую в local/.env.
 R2_ACCOUNT_ID=""
 R2_ACCESS_KEY_ID=""
 R2_SECRET_ACCESS_KEY=""

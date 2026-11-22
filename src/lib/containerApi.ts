@@ -1,7 +1,7 @@
 /**
- * Конструктор запроса к RENDERER-контейнеру (ffmpeg) — вынесен для тестов.
- * Прокси теперь идёт напрямую через PROXY_GATEWAY_URL (без контейнера),
- * поэтому здесь только сборка /render-запроса.
+ * Конструктор запроса к локальному рендереру (ffmpeg) — вынесен для тестов.
+ * Рендер и прокси крутятся локально на ПК пользователя (local/server.js),
+ * поэтому здесь только сборка тела POST-запроса на VIDEO_RENDERER_URL.
  */
 
 import type { ScriptSegment } from "../shorts/script.js";
@@ -14,7 +14,8 @@ export interface ContainerRenderRequest {
   musicKey: string;
   audioKey?: string;
   lang: "ru" | "en";
-  r2: { accountId: string; bucket: string; accessKeyId: string; secretAccessKey: string };
+  // R2-ключи опциональны: если не переданы, локальный рендерер берёт их из своего .env.
+  r2?: { accountId: string; bucket: string; accessKeyId: string; secretAccessKey: string };
 }
 
 export function buildRenderRequest(input: {
@@ -25,7 +26,7 @@ export function buildRenderRequest(input: {
   musicKey: string;
   audioKey?: string;
   lang: "ru" | "en";
-  r2: ContainerRenderRequest["r2"];
+  r2?: ContainerRenderRequest["r2"];
 }): ContainerRenderRequest {
   return {
     contentId: input.contentId,

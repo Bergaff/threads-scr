@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildRenderRequest } from "../src/lib/containerApi.js";
 import { buildScript } from "../src/shorts/script.js";
 
-describe("container API (RENDERER-контейнер)", () => {
+describe("локальный рендерер (VIDEO_RENDERER_URL)", () => {
   it("buildRenderRequest: сегменты и R2-ключи", () => {
     const script = buildScript({ hook: "Крючок", postText: "Текст поста", replies: [], outro: "Финал" });
     const req = buildRenderRequest({
@@ -17,6 +17,6 @@ describe("container API (RENDERER-контейнер)", () => {
     expect(req.contentId).toBe("ci1");
     expect(req.segments[0].type).toBe("hook");
     expect(req.cardKey).toBe("cards/ci1.svg");
-    expect(req.r2.bucket).toBe("b");
+    expect(req.r2?.bucket).toBe("b");
   });
 });

@@ -50,7 +50,7 @@ export function classifyError(status: number, body: string): CollectorError["kin
 
 export interface FetchOptions {
   gatewayUrl?: string;
-  /** Per-account прокси (http://user:pass@host:port) — передаётся шлюзу провайдера. */
+  /** Per-account прокси (http://user:pass@host:port) — передаётся локальному шлюзу заголовком X-Proxy-Url. */
   proxyUrl?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -70,7 +70,9 @@ export async function collectorFetch(
     "X-Account-Id": account.id,
   };
 
-  // Путь 2: внешний HTTP-шлюз (PROXY_GATEWAY_URL).
+  // Путь 2: внешний HTTP-шлюз (PROXY_GATEWAY_URL) — локальный сервис на ПК
+  // пользователя (см. local/). Прокси per-account передаём заголовком X-Proxy-Url.
+  if (opts.proxyUrl) headers["X-Proxy-Url"] = opts.proxyUrl;
   const target = opts.gatewayUrl
     ? `${opts.gatewayUrl.replace(/\/$/, "")}/fetch?url=${encodeURIComponent(url)}`
     : url;

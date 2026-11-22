@@ -17,8 +17,6 @@ import { handleAdmin } from "./admin/api.js";
 import { handleCron } from "./cron.js";
 import { handleJob } from "./jobs/handlers.js";
 
-export { RendererContainer } from "./containers.js";
-
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);

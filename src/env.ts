@@ -7,10 +7,9 @@ export interface Env {
   MEDIA: R2Bucket;
   JOBS: Queue<JobMessage>;
   AI: Ai;
-  // RENDERER-контейнер (ffmpeg) — см. src/containers.ts. Опционален: без него
-  // рендер идёт через VIDEO_RENDERER_URL. Прокси НЕ в контейнере — напрямую
-  // через PROXY_GATEWAY_URL (чтобы не биллить круглосуточно из-за cron).
-  RENDERER?: DurableObjectNamespace;
+  // Рендер Shorts и прокси живут локально на ПК пользователя (см. local/),
+  // а не в Cloudflare-контейнерах — чтобы не тратить общий бюджет контейнеров
+  // аккаунта. Worker дёргает их по этим URL (объявлены ниже в блоке переменных).
   ENVIRONMENT: string;
   SITE_URL: string;
   BOT_USERNAME: string;
@@ -32,7 +31,9 @@ export interface Env {
   YOUTUBE_OAUTH_TOKEN_EN?: string;
   ADMIN_API_KEY?: string;
   COOKIE_ENCRYPTION_KEY?: string; // base64, 32 байта
-  // R2 S3-ключи для контейнера-рендерера (контейнер ходит в R2 напрямую).
+  // R2 S3-ключи: используются локальным рендерером (local/server.js) для чтения
+  // карточек/аудио и записи готовых роликов. Можно задать в .dev.vars (→ Worker)
+  // либо напрямую в local/.env у самого рендерера.
   R2_ACCOUNT_ID?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_SECRET_ACCESS_KEY?: string;

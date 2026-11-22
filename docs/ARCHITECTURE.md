@@ -8,7 +8,7 @@
 
 | Модуль ТЗ | Cloudflare-реализация |
 |---|---|
-| Сборщик (4.1–4.3) | Worker + `fetch` с cookies аккаунта, через прокси-шлюз провайдера (`PROXY_GATEWAY_URL`). JSON из GraphQL разбирается в `src/collector/threads.ts`. |
+| Сборщик (4.1–4.3) | Worker + `fetch` с cookies аккаунта, через **локальный** прокси-шлюз (`PROXY_GATEWAY_URL`, см. `local/`). JSON из GraphQL разбирается в `src/collector/threads.ts`. |
 | Оценка и фильтры (4.4–4.6) | Чистые функции `src/lib/scoring.ts`, `filters.ts`, `language.ts` — покрыты тестами. |
 | Планировщик (4.8) | Cron Trigger (каждые 5 мин) → `src/cron.ts` → Queues. Приоритеты и бюджет страниц — в `src/scheduler/planner.ts`. |
 | Нейросеть (5) | Workers AI по умолчанию (`@cf/meta/llama-3.1-8b-instruct`), или OpenAI-совместимый API. Промпты — `prompts/*.md`. |
@@ -23,24 +23,30 @@
 ## Что НЕ работает в Workers и как решается
 
 ### 1. Per-account proxy (4.1)
-Workers `fetch` не умеет ходить через прокси. Решение — **HTTP-шлюз прокси-провайдера**
-(`PROXY_GATEWAY_URL`): Worker дёргает API провайдера (Bright Data / Oxylabs / свой Squid)
-напрямую, передавая `X-Account-Id` и per-account прокси (`account.proxy`).
+Workers `fetch` не умеет ходить через прокси. Решение — **локальный прокси-шлюз**
+(`PROXY_GATEWAY_URL`): это `local/server.js`, который крутится **на ПК пользователя**,
+а Worker дёргает его по туннелю (cloudflared/ngrok). Шлюз делает `GET /fetch?url=...`
+и ходит через per-account прокси (`account.proxy`, передаётся заголовком `X-Proxy-Url`).
+Без прокси — с реального IP ПК (часто резидентный, что хорошо для Threads).
 
-**Почему НЕ контейнер для прокси:** cron сборщика бьёт каждые 5 минут 24/7, поэтому
-прокси-контейнер не засыпал бы (sleepAfter не достигается) и биллился круглосуточно —
-реальный уход за лимиты (см. `docs/COST.md`). Прямой вызов провайдера стоит копейки
-и предсказуем. Код: `src/collector/client.ts` (путь `gatewayUrl`).
+**Почему НЕ в Cloudflare и не у провайдера:** бюджет контейнеров аккаунта уже забит
+другим проектом, а внешний прокси-провайдер — отдельная плата. Локальный шлюз бесплатен
+и вообще не трогает бюджет Cloudflare. Код: `src/collector/client.ts` (путь `gatewayUrl`),
+`local/server.js` (`/fetch`).
 
 ### 2. ffmpeg / монтаж Shorts (7.6)
-В Workers нет ffmpeg и долгих CPU-задач. Решение — **Cloudflare Containers**:
-контейнер `RENDERER` (binding `env.RENDERER`, `standard-2`) держит ffmpeg + Piper TTS
-(офлайн, без API-оплат). Код контейнера — `containers/renderer/server.js`. Worker кладёт
-SVG-карточку, фон и музыку в R2, шлёт `POST /render` с
-сегментами сценария → контейнер собирает mp4 + karaoke-субтитры + loudnorm −14 LUFS
-и кладёт результат обратно в R2. Фолбэк: внешний рендерер (`VIDEO_RENDERER_URL`).
-Пока рендерер не подключён, ролик можно скачать из бота-редактора (⬇️) и загрузить вручную —
-это и есть режим «до аудита Google» из раздела 7.7.
+В Workers нет ffmpeg и долгих CPU-задач. Решение — **локальный рендерер**
+(`VIDEO_RENDERER_URL` → `local/server.js` на ПК пользователя): ffmpeg + Piper TTS
+(офлайн, без API-оплат). Worker кладёт SVG-карточку, фон и музыку в R2, шлёт `POST /render`
+с сегментами сценария → локальный сервис собирает mp4 + karaoke-субтитры + loudnorm −14 LUFS
+и кладёт результат обратно в R2.
+
+**Почему локально, а не Cloudflare Container:** бюджет контейнеров аккаунта уже maxed
+другим проектом — любой контейнер здесь увеличил бы оверхед сверх $5. Локальный ПК
+делает тяжёлую работу бесплатно (см. `docs/COST.md`). Код: `local/server.js`, `local/README.md`,
+`src/lib/containerApi.ts` (`buildRenderRequest`), `src/jobs/handlers.ts` (`renderShorts`).
+Пока локальный рендерер не подключён, ролик можно скачать из бота-редактора (⬇️) — режим
+«до аудита Google» из раздела 7.7.
 
 ### 3. Playwright / скриншоты (6.2)
 Не нужны: карточка рисуется из данных в SVG. Конвертация SVG→PNG:

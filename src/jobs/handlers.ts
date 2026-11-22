@@ -21,23 +21,6 @@ import { publishToTelegram } from "../publish/telegram.js";
 import { buildYoutubeMeta } from "../publish/youtube.js";
 import { buildRenderRequest } from "../lib/containerApi.js";
 
-/** Вызов RENDERER-контейнера (ffmpeg) из Worker'а. */
-async function callRenderer(
-  ns: DurableObjectNamespace | undefined,
-  body: unknown,
-): Promise<Record<string, unknown>> {
-  if (!ns) throw new Error("RENDERER container not bound");
-  const stub = ns.getByName("main");
-  const res = await stub.fetch(new Request("http://container/render", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }));
-  const data = (await res.json()) as Record<string, unknown>;
-  if (!res.ok) throw new Error(`RENDERER /render: ${String(data.error ?? res.status)}`);
-  return data;
-}
-
 async function loadAccount(env: Env, accountId?: string): Promise<CollectorAccount | null> {
   const row = accountId
     ? await env.DB.prepare("SELECT * FROM accounts WHERE id = ? AND enabled = 1").bind(accountId).first<Record<string, unknown>>()
@@ -80,7 +63,7 @@ async function pauseAccount(env: Env, accountId: string, err: CollectorError): P
 
 async function collect(env: Env, account: CollectorAccount, url: string, source: string): Promise<void> {
   try {
-    // Прокси — напрямую через HTTP-шлюз провайдера (PROXY_GATEWAY_URL).
+    // Прокси — через локальный HTTP-шлюз на ПК пользователя (PROXY_GATEWAY_URL).
     // Контейнер для прокси НЕ используется: cron каждые 5 мин его бы не давал заснуть → круглосуточный биллинг.
     const { json, body } = await collectorFetch(account, url, {
       gatewayUrl: env.PROXY_GATEWAY_URL || undefined,
@@ -297,42 +280,32 @@ async function renderShorts(env: Env, contentId: string): Promise<void> {
   const backgroundKey = `assets/backgrounds/bg-${day % 10}.mp4`;
   const musicKey = `assets/music/track-${day % 10}.mp3`;
 
-  // Путь 1: Cloudflare Container (ffmpeg + Piper TTS внутри).
-  if (env.RENDERER && env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY) {
+  // Рендер Шортс — на локальной машине пользователя (VIDEO_RENDERER_URL, см. local/),
+  // НЕ в Cloudflare-контейнере: тяжёлый ffmpeg остаётся вне общего бюджета аккаунта.
+  // Сервис читает карточку/аудио из R2 и кладёт готовый mp4 обратно в R2.
+  if (env.VIDEO_RENDERER_URL) {
     try {
-      const data = await callRenderer(env.RENDERER, buildRenderRequest({
-        contentId,
-        segments: script.segments,
-        cardKey,
-        backgroundKey,
-        musicKey,
-        lang,
-        r2: {
-          accountId: env.R2_ACCOUNT_ID,
-          bucket: env.R2_BUCKET ?? "threads-digest-media",
-          accessKeyId: env.R2_ACCESS_KEY_ID,
-          secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-        },
-      })) as { videoKey?: string; previewKey?: string; durationSec?: number };
-      await env.DB.prepare(
-        "UPDATE content_items SET video_path = ?, preview_path = ?, updated_at = datetime('now') WHERE id = ?",
-      ).bind(data.videoKey ?? "", data.previewKey ?? "", contentId).run();
-      await log(env.DB, "info", `Shorts rendered: ${data.videoKey} (${data.durationSec}s)`);
-      return;
+      const r2 = env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY
+        ? { accountId: env.R2_ACCOUNT_ID, bucket: env.R2_BUCKET ?? "threads-digest-media", accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY }
+        : undefined;
+      const res = await fetch(env.VIDEO_RENDERER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildRenderRequest({ contentId, segments: script.segments, cardKey, backgroundKey, musicKey, lang, r2 })),
+      });
+      const data = (await res.json().catch(() => ({}))) as { videoKey?: string; previewKey?: string; durationSec?: number };
+      if (data.videoKey) {
+        await env.DB.prepare(
+          "UPDATE content_items SET video_path = ?, preview_path = ?, updated_at = datetime('now') WHERE id = ?",
+        ).bind(data.videoKey, data.previewKey ?? "", contentId).run();
+        await log(env.DB, "info", `Shorts rendered: ${data.videoKey} (${data.durationSec}s)`);
+        return;
+      }
     } catch (err) {
-      await log(env.DB, "error", `Container render failed for ${contentId}: ${err instanceof Error ? err.message : String(err)}`);
+      await log(env.DB, "error", `Renderer failed for ${contentId}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-
-  // Путь 2: внешний рендерер по VIDEO_RENDERER_URL (VPS/Fly.io с ffmpeg).
-  if (env.VIDEO_RENDERER_URL) {
-    await fetch(env.VIDEO_RENDERER_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contentId, script, assKey: `shorts/${contentId}.ass` }),
-    }).catch(() => {});
-  }
-  await log(env.DB, "info", `Shorts assets ready for ${contentId} (ASS in R2, mp4 via external renderer)`);
+  await log(env.DB, "info", `Shorts assets ready for ${contentId} (ASS in R2; mp4 via VIDEO_RENDERER_URL/local)`);
 }
 
 async function publish(env: Env, contentId: string, payload?: Record<string, unknown>): Promise<void> {

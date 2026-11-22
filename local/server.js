@@ -1,19 +1,30 @@
 /**
- * Threads Digest — RENDERER-контейнер (Cloudflare Containers).
- * Роль одна: монтаж Shorts (ffmpeg) + Piper TTS. Прокси сюда НЕ входит —
- * сборщик ходит в прокси-провайдер напрямую из Worker'а (PROXY_GATEWAY_URL),
- * т.к. иначе контейнер не засыпал бы из-за cron каждые 5 минут.
+ * Threads Digest — ЛОКАЛЬНЫЙ сервис (на ПК пользователя).
  *
- * Контейнер stateless: всё состояние — в R2 (доступ по S3-ключам из запроса),
- * диск эфемерный. Масштаб в ноль после sleepAfter=5m (см. src/containers.ts).
+ * Зачем: тяжёлые задачи (ffmpeg-монтаж, Piper TTS, прокси-шлюз) крутим локально,
+ * чтобы НЕ тратить бюджет Cloudflare-контейнеров аккаунта (там уже жрёт другой проект).
+ * Worker в Клауде дёргает этот сервис по туннелю (cloudflared/ngrok).
+ *
+ * Эндпоинты:
+ *   GET  /health        — проверка живости
+ *   GET  /fetch?url=... — прозрачный прокси (per-account прокси из заголовка X-Proxy-Url)
+ *   POST /tts           — Piper TTS: { text, lang } → { audioBase64, durationSec }
+ *   POST /render        — монтаж Shorts: { contentId, segments, cardKey, backgroundKey,
+ *                         musicKey, audioKey?, lang, r2? } → { videoKey, previewKey, durationSec }
+ *
+ * R2-доступ: из тела запроса (r2) либо из local/.env (R2_*).
  */
 
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { config as loadDotenv } from "dotenv";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { ProxyAgent, fetch as undiciFetch } from "undici";
 import sharp from "sharp";
+
+loadDotenv();
 
 const PORT = Number(process.env.PORT ?? 8080);
 const VOICES = {
@@ -57,6 +68,19 @@ async function ffprobeDuration(file) {
 }
 
 // ── R2 (S3 API) ─────────────────────────────────────────────────────────────
+function r2Creds(body) {
+  const r2 = body.r2 ?? {
+    accountId: process.env.R2_ACCOUNT_ID,
+    bucket: process.env.R2_BUCKET ?? "threads-digest-media",
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  };
+  if (!r2.accountId || !r2.accessKeyId || !r2.secretAccessKey) {
+    throw new Error("R2 credentials missing (pass in body.r2 or set R2_* in local/.env)");
+  }
+  return r2;
+}
+
 function s3(r2) {
   return new S3Client({
     region: "auto",
@@ -96,7 +120,7 @@ async function ttsSegment(text, lang, outWav) {
   return ffprobeDuration(outWav);
 }
 
-// ── Субтитры ASS (та же логика, что в Worker: src/shorts/subtitles.ts) ──────
+// ── Субтитры ASS (karaoke по словам) ───────────────────────────────────────
 function assTime(sec) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60), cs = Math.floor((sec % 1) * 100);
   const p = (n) => String(n).padStart(2, "0");
@@ -122,13 +146,13 @@ function buildAss(segments) {
 
 // ── POST /render ────────────────────────────────────────────────────────────
 async function handleRender(body) {
-  const { contentId, segments, cardKey, backgroundKey, musicKey, audioKey, lang, r2 } = body;
-  if (!contentId || !Array.isArray(segments) || !r2) throw new Error("missing contentId/segments/r2");
+  const { contentId, segments, cardKey, backgroundKey, musicKey, audioKey, lang } = body;
+  if (!contentId || !Array.isArray(segments)) throw new Error("missing contentId/segments");
+  const r2 = r2Creds(body);
   const dir = `/tmp/render-${contentId}`;
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
 
-  // 1. Ассеты из R2
   const [cardSvg, background, music] = await Promise.all([
     r2Get(r2, cardKey),
     r2Get(r2, backgroundKey),
@@ -138,15 +162,15 @@ async function handleRender(body) {
   await writeFile(`${dir}/bg.mp4`, background);
   await writeFile(`${dir}/music.mp3`, music);
 
-  // 2. Озвучка: готовая (audioKey) или Piper по сегментам (реальные длительности)
   const timed = [];
   if (audioKey) {
     const audio = await r2Get(r2, audioKey);
     await writeFile(`${dir}/voice.wav`, audio);
     const total = await ffprobeDuration(`${dir}/voice.wav`);
     let cursor = 0;
+    const totalLen = segments.reduce((s, x) => s + x.text.length, 0) || 1;
     for (const seg of segments) {
-      const share = total * (seg.text.length / Math.max(1, segments.reduce((s, x) => s + x.text.length, 0)));
+      const share = (total * seg.text.length) / totalLen;
       timed.push({ ...seg, startSec: cursor, endSec: cursor + share });
       cursor += share;
     }
@@ -158,7 +182,6 @@ async function handleRender(body) {
       timed.push({ ...segments[i], startSec: cursor, endSec: cursor + dur });
       cursor += dur;
     }
-    // Склейка сегментов в один голосовой трек
     const concatList = segments.map((_, i) => `file 'seg-${i}.wav'`).join("\n");
     await writeFile(`${dir}/concat.txt`, concatList);
     await run("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", `${dir}/concat.txt`, "-c", "copy", `${dir}/voice.wav`]);
@@ -166,13 +189,9 @@ async function handleRender(body) {
   const totalSec = timed.length ? timed[timed.length - 1].endSec : 0;
   if (totalSec < 5) throw new Error(`rendered voice too short: ${totalSec}s`);
 
-  // 3. Карточка SVG → PNG 1080 по ширине
   await sharp(`${dir}/card.svg`).png().resize(1080).toFile(`${dir}/card.png`);
-
-  // 4. Субтитры по реальным таймингам
   await writeFile(`${dir}/subs.ass`, buildAss(timed));
 
-  // 5. ffmpeg: фон + карточка + субтитры + голос + музыка (ducking) + loudnorm −14 LUFS
   const postSeg = timed.find((s) => s.type === "post") ?? timed[0];
   const cardStart = postSeg.startSec;
   const cardEnd = timed[timed.length - 1].endSec;
@@ -197,12 +216,10 @@ async function handleRender(body) {
   try {
     await run("ffmpeg", baseArgs);
   } catch {
-    // Fallback без субтитров (если в ffmpeg нет libass): тот же фильтр минус subtitles.
-    const noSubs = filter.replace(",subtitles=subs.ass", "");
+    const noSubs = filter.replace(/,subtitles=\S+/, "");
     await run("ffmpeg", baseArgs.map((a) => (a === filter ? noSubs : a)));
   }
 
-  // 6. Превью-кадр + загрузка в R2
   await run("ffmpeg", ["-y", "-ss", "1", "-i", `${dir}/out.mp4`, "-frames:v", "1", `${dir}/preview.png`]);
   const videoKey = `shorts/${contentId}.mp4`;
   const previewKey = `shorts/${contentId}-preview.png`;
@@ -213,19 +230,53 @@ async function handleRender(body) {
   return { videoKey, previewKey, durationSec: Math.round(totalSec * 10) / 10, segments: timed };
 }
 
+// ── POST /tts ───────────────────────────────────────────────────────────────
+async function handleTts(body) {
+  const text = String(body.text ?? "");
+  const lang = body.lang === "en" ? "en" : "ru";
+  const dir = "/tmp/tts";
+  await mkdir(dir, { recursive: true });
+  const wav = `${dir}/tts-${Date.now()}.wav`;
+  const dur = await ttsSegment(text, lang, wav);
+  const audio = await readFile(wav);
+  return { audioBase64: audio.toString("base64"), durationSec: dur };
+}
+
+// ── GET/POST /fetch — прозрачный прокси (per-account прокси из X-Proxy-Url) ──
+async function handleFetch(req, url, incomingHeaders) {
+  const proxyUrl = incomingHeaders["x-proxy-url"];
+  const forward = {};
+  for (const [k, v] of Object.entries(incomingHeaders)) {
+    if (["x-proxy-url", "host", "content-length", "connection"].includes(k)) continue;
+    forward[k] = v;
+  }
+  const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
+  const res = await undiciFetch(url, {
+    method: req.method,
+    headers: forward,
+    dispatcher,
+    signal: AbortSignal.timeout(20_000),
+    redirect: "follow",
+  });
+  const body = await res.text();
+  return { status: res.status, body };
+}
+
 // ── HTTP ────────────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, service: "threads-digest-renderer" });
-    if (req.method === "POST" && req.url === "/render") return json(res, 200, await handleRender(await readJsonBody(req)));
-    if (req.method === "POST" && req.url === "/tts") {
-      const { text, lang } = await readJsonBody(req);
-      const dir = "/tmp/tts";
-      await mkdir(dir, { recursive: true });
-      const wav = `${dir}/tts-${Date.now()}.wav`;
-      const dur = await ttsSegment(String(text ?? ""), lang === "en" ? "en" : "ru", wav);
-      const audio = await readFile(wav);
-      return json(res, 200, { audioBase64: audio.toString("base64"), durationSec: dur });
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    if (req.method === "GET" && url.pathname === "/health") return json(res, 200, { ok: true, service: "threads-digest-local" });
+    if (req.method === "POST" && url.pathname === "/render") return json(res, 200, await handleRender(await readJsonBody(req)));
+    if (req.method === "POST" && url.pathname === "/tts") return json(res, 200, await handleTts(await readJsonBody(req)));
+    if ((req.method === "GET" || req.method === "POST") && url.pathname === "/fetch") {
+      const target = req.method === "POST"
+        ? (await readJsonBody(req)).url
+        : url.searchParams.get("url");
+      if (!target) return json(res, 400, { error: "missing url" });
+      const result = await handleFetch(req, target, Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k.toLowerCase(), v])));
+      res.writeHead(result.status, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end(result.body);
     }
     return json(res, 404, { error: "not found" });
   } catch (err) {
@@ -234,4 +285,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`threads-digest-renderer listening on ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`threads-digest-local listening on ${PORT} (ffmpeg + Piper + proxy)`);
+  console.log(`Expose it to Cloudflare: cloudflared tunnel --url http://localhost:${PORT}`);
+});
