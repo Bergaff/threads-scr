@@ -1,34 +1,10 @@
 /**
- * Чистые конструкторы запросов к контейнеру — вынесены для тестов.
- * Сам вызов контейнера — в src/jobs/handlers.ts и src/collector/client.ts.
+ * Конструктор запроса к RENDERER-контейнеру (ffmpeg) — вынесен для тестов.
+ * Прокси теперь идёт напрямую через PROXY_GATEWAY_URL (без контейнера),
+ * поэтому здесь только сборка /render-запроса.
  */
 
-import type { CollectorAccount } from "../collector/client.js";
-import { cookiesToHeader } from "../collector/client.js";
 import type { ScriptSegment } from "../shorts/script.js";
-
-export interface ContainerFetchRequest {
-  url: string;
-  headers: Record<string, string>;
-  proxyUrl?: string;
-  timeoutMs: number;
-}
-
-export function buildContainerFetchRequest(account: CollectorAccount, url: string, proxyUrl?: string): ContainerFetchRequest {
-  return {
-    url,
-    headers: {
-      Cookie: cookiesToHeader(account.cookies),
-      "User-Agent": account.userAgent,
-      "Accept-Language": account.locale,
-      Accept: "application/json, text/html;q=0.9, */*;q=0.8",
-      "X-IG-App-ID": "238260118697367",
-      "X-Account-Id": account.id,
-    },
-    proxyUrl: proxyUrl || undefined,
-    timeoutMs: 20_000,
-  };
-}
 
 export interface ContainerRenderRequest {
   contentId: string;
@@ -61,14 +37,4 @@ export function buildRenderRequest(input: {
     lang: input.lang,
     r2: input.r2,
   };
-}
-
-export interface ContainerFetchResponse {
-  status: number;
-  body: string;
-}
-
-export function parseContainerFetchResponse(data: unknown): ContainerFetchResponse {
-  const obj = (data ?? {}) as { status?: number; body?: string };
-  return { status: Number(obj.status ?? 0), body: String(obj.body ?? "") };
 }

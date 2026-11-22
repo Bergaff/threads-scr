@@ -1,11 +1,11 @@
 /**
- * Threads Digest — контейнер (Cloudflare Containers).
- * Один образ, две роли:
- *   RENDERER (standard-2): POST /render — монтаж Shorts (ffmpeg), POST /tts — Piper TTS
- *   PROXY    (basic):      POST /fetch  — fetch через per-account прокси для сборщика
+ * Threads Digest — RENDERER-контейнер (Cloudflare Containers).
+ * Роль одна: монтаж Shorts (ffmpeg) + Piper TTS. Прокси сюда НЕ входит —
+ * сборщик ходит в прокси-провайдер напрямую из Worker'а (PROXY_GATEWAY_URL),
+ * т.к. иначе контейнер не засыпал бы из-за cron каждые 5 минут.
  *
  * Контейнер stateless: всё состояние — в R2 (доступ по S3-ключам из запроса),
- * диск эфемерный. Масштаб в ноль после sleepAfter (см. src/containers.ts).
+ * диск эфемерный. Масштаб в ноль после sleepAfter=5m (см. src/containers.ts).
  */
 
 import http from "node:http";
@@ -13,7 +13,6 @@ import { spawn } from "node:child_process";
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { ProxyAgent, fetch as undiciFetch } from "undici";
 import sharp from "sharp";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -214,26 +213,10 @@ async function handleRender(body) {
   return { videoKey, previewKey, durationSec: Math.round(totalSec * 10) / 10, segments: timed };
 }
 
-// ── POST /fetch (прокси-шлюз) ───────────────────────────────────────────────
-async function handleFetch(body) {
-  const { url, headers = {}, proxyUrl, timeoutMs = 20000 } = body;
-  if (!url) throw new Error("missing url");
-  const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
-  const res = await undiciFetch(url, {
-    headers,
-    dispatcher,
-    signal: AbortSignal.timeout(timeoutMs),
-    redirect: "follow",
-  });
-  const text = await res.text();
-  return { status: res.status, body: text };
-}
-
 // ── HTTP ────────────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, service: "threads-digest-container" });
-    if (req.method === "POST" && req.url === "/fetch") return json(res, 200, await handleFetch(await readJsonBody(req)));
+    if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, service: "threads-digest-renderer" });
     if (req.method === "POST" && req.url === "/render") return json(res, 200, await handleRender(await readJsonBody(req)));
     if (req.method === "POST" && req.url === "/tts") {
       const { text, lang } = await readJsonBody(req);
@@ -251,4 +234,4 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`threads-digest-container listening on ${PORT}`));
+server.listen(PORT, () => console.log(`threads-digest-renderer listening on ${PORT}`));

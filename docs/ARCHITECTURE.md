@@ -8,7 +8,7 @@
 
 | Модуль ТЗ | Cloudflare-реализация |
 |---|---|
-| Сборщик (4.1–4.3) | Worker + `fetch` с cookies аккаунта. JSON из GraphQL разбирается в `src/collector/threads.ts` (как `threadsFeed.ts` в threadsviewer). Браузер не нужен — основной путь всегда JSON. |
+| Сборщик (4.1–4.3) | Worker + `fetch` с cookies аккаунта, через прокси-шлюз провайдера (`PROXY_GATEWAY_URL`). JSON из GraphQL разбирается в `src/collector/threads.ts`. |
 | Оценка и фильтры (4.4–4.6) | Чистые функции `src/lib/scoring.ts`, `filters.ts`, `language.ts` — покрыты тестами. |
 | Планировщик (4.8) | Cron Trigger (каждые 5 мин) → `src/cron.ts` → Queues. Приоритеты и бюджет страниц — в `src/scheduler/planner.ts`. |
 | Нейросеть (5) | Workers AI по умолчанию (`@cf/meta/llama-3.1-8b-instruct`), или OpenAI-совместимый API. Промпты — `prompts/*.md`. |
@@ -23,17 +23,20 @@
 ## Что НЕ работает в Workers и как решается
 
 ### 1. Per-account proxy (4.1)
-Workers `fetch` не умеет ходить через прокси. Решение — **Cloudflare Containers**:
-контейнер `PROXY` (binding `env.PROXY`) принимает `POST /fetch` и ходит через
-per-account прокси (`account.proxy`, привязка аккаунт↔IP навсегда). Масштаб в ноль —
-плата только за секунды работы (см. `docs/COST.md`). Фолбэк: внешний HTTP-шлюз
-(`PROXY_GATEWAY_URL`).
+Workers `fetch` не умеет ходить через прокси. Решение — **HTTP-шлюз прокси-провайдера**
+(`PROXY_GATEWAY_URL`): Worker дёргает API провайдера (Bright Data / Oxylabs / свой Squid)
+напрямую, передавая `X-Account-Id` и per-account прокси (`account.proxy`).
+
+**Почему НЕ контейнер для прокси:** cron сборщика бьёт каждые 5 минут 24/7, поэтому
+прокси-контейнер не засыпал бы (sleepAfter не достигается) и биллился круглосуточно —
+реальный уход за лимиты (см. `docs/COST.md`). Прямой вызов провайдера стоит копейки
+и предсказуем. Код: `src/collector/client.ts` (путь `gatewayUrl`).
 
 ### 2. ffmpeg / монтаж Shorts (7.6)
 В Workers нет ffmpeg и долгих CPU-задач. Решение — **Cloudflare Containers**:
 контейнер `RENDERER` (binding `env.RENDERER`, `standard-2`) держит ffmpeg + Piper TTS
-(офлайн, без API-оплат). Код контейнера — `containers/renderer/server.js` (один образ
-на две роли). Worker кладёт SVG-карточку, фон и музыку в R2, шлёт `POST /render` с
+(офлайн, без API-оплат). Код контейнера — `containers/renderer/server.js`. Worker кладёт
+SVG-карточку, фон и музыку в R2, шлёт `POST /render` с
 сегментами сценария → контейнер собирает mp4 + karaoke-субтитры + loudnorm −14 LUFS
 и кладёт результат обратно в R2. Фолбэк: внешний рендерер (`VIDEO_RENDERER_URL`).
 Пока рендерер не подключён, ролик можно скачать из бота-редактора (⬇️) и загрузить вручную —

@@ -50,8 +50,7 @@ export function classifyError(status: number, body: string): CollectorError["kin
 
 export interface FetchOptions {
   gatewayUrl?: string;
-  /** Cloudflare Container (PROXY): fetch через per-account прокси внутри контейнера. */
-  viaContainer?: (url: string, headers: Record<string, string>, proxyUrl?: string) => Promise<{ status: number; body: string }>;
+  /** Per-account прокси (http://user:pass@host:port) — передаётся шлюзу провайдера. */
   proxyUrl?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -70,24 +69,6 @@ export async function collectorFetch(
     "X-IG-App-ID": "238260118697367",
     "X-Account-Id": account.id,
   };
-
-  // Путь 1: контейнер-шлюз (рекомендуется) — прокси per-account внутри контейнера.
-  if (opts.viaContainer) {
-    const { status, body } = await opts.viaContainer(url, headers, opts.proxyUrl);
-    let json: unknown = null;
-    try {
-      json = JSON.parse(body);
-    } catch {
-      json = null;
-    }
-    if (status === 401 || status === 403 || status === 429) {
-      throw new CollectorError(classifyError(status, body), `HTTP ${status} for ${account.label}`);
-    }
-    if (/checkpoint|login_required/i.test(body.slice(0, 2000))) {
-      throw new CollectorError("checkpoint", `Checkpoint for ${account.label}`);
-    }
-    return { status, body, json };
-  }
 
   // Путь 2: внешний HTTP-шлюз (PROXY_GATEWAY_URL).
   const target = opts.gatewayUrl

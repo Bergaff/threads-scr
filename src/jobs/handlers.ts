@@ -19,24 +19,22 @@ import { buildTgCaption } from "../bot/telegram.js";
 import { TelegramClient } from "../bot/telegram.js";
 import { publishToTelegram } from "../publish/telegram.js";
 import { buildYoutubeMeta } from "../publish/youtube.js";
-import { buildContainerFetchRequest, buildRenderRequest, parseContainerFetchResponse } from "../lib/containerApi.js";
+import { buildRenderRequest } from "../lib/containerApi.js";
 
-/** Вызов контейнера (PROXY/RENDERER) из Worker'а. */
-async function callContainer(
+/** Вызов RENDERER-контейнера (ffmpeg) из Worker'а. */
+async function callRenderer(
   ns: DurableObjectNamespace | undefined,
-  name: string,
-  path: string,
   body: unknown,
-): Promise<unknown> {
-  if (!ns) throw new Error(`container ${name} not bound`);
+): Promise<Record<string, unknown>> {
+  if (!ns) throw new Error("RENDERER container not bound");
   const stub = ns.getByName("main");
-  const res = await stub.fetch(new Request(`http://container${path}`, {
+  const res = await stub.fetch(new Request("http://container/render", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   }));
   const data = (await res.json()) as Record<string, unknown>;
-  if (!res.ok) throw new Error(`container ${name} ${path}: ${String(data.error ?? res.status)}`);
+  if (!res.ok) throw new Error(`RENDERER /render: ${String(data.error ?? res.status)}`);
   return data;
 }
 
@@ -82,16 +80,10 @@ async function pauseAccount(env: Env, accountId: string, err: CollectorError): P
 
 async function collect(env: Env, account: CollectorAccount, url: string, source: string): Promise<void> {
   try {
-    // Приоритет: контейнер-шлюз (per-account прокси) → внешний шлюз → прямой fetch.
-    const viaContainer = env.PROXY
-      ? async (u: string, headers: Record<string, string>, proxyUrl?: string) => {
-          const data = await callContainer(env.PROXY, "proxy", "/fetch", buildContainerFetchRequest(account, u, proxyUrl));
-          return parseContainerFetchResponse(data);
-        }
-      : undefined;
+    // Прокси — напрямую через HTTP-шлюз провайдера (PROXY_GATEWAY_URL).
+    // Контейнер для прокси НЕ используется: cron каждые 5 мин его бы не давал заснуть → круглосуточный биллинг.
     const { json, body } = await collectorFetch(account, url, {
       gatewayUrl: env.PROXY_GATEWAY_URL || undefined,
-      viaContainer,
       proxyUrl: account.proxy,
     });
     const payload = json ?? body;
@@ -308,7 +300,7 @@ async function renderShorts(env: Env, contentId: string): Promise<void> {
   // Путь 1: Cloudflare Container (ffmpeg + Piper TTS внутри).
   if (env.RENDERER && env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY) {
     try {
-      const data = (await callContainer(env.RENDERER, "renderer", "/render", buildRenderRequest({
+      const data = await callRenderer(env.RENDERER, buildRenderRequest({
         contentId,
         segments: script.segments,
         cardKey,
@@ -321,7 +313,7 @@ async function renderShorts(env: Env, contentId: string): Promise<void> {
           accessKeyId: env.R2_ACCESS_KEY_ID,
           secretAccessKey: env.R2_SECRET_ACCESS_KEY,
         },
-      }))) as { videoKey?: string; previewKey?: string; durationSec?: number };
+      })) as { videoKey?: string; previewKey?: string; durationSec?: number };
       await env.DB.prepare(
         "UPDATE content_items SET video_path = ?, preview_path = ?, updated_at = datetime('now') WHERE id = ?",
       ).bind(data.videoKey ?? "", data.previewKey ?? "", contentId).run();

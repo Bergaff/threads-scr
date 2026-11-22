@@ -7,10 +7,10 @@ export interface Env {
   MEDIA: R2Bucket;
   JOBS: Queue<JobMessage>;
   AI: Ai;
-  // Cloudflare Containers (см. src/containers.ts). Опционально: без них
-  // рендер Shorts и прокси-шлюз работают через VIDEO_RENDERER_URL / PROXY_GATEWAY_URL.
+  // RENDERER-контейнер (ffmpeg) — см. src/containers.ts. Опционален: без него
+  // рендер идёт через VIDEO_RENDERER_URL. Прокси НЕ в контейнере — напрямую
+  // через PROXY_GATEWAY_URL (чтобы не биллить круглосуточно из-за cron).
   RENDERER?: DurableObjectNamespace;
-  PROXY?: DurableObjectNamespace;
   ENVIRONMENT: string;
   SITE_URL: string;
   BOT_USERNAME: string;

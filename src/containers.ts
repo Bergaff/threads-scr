@@ -1,12 +1,16 @@
 /**
- * Cloudflare Containers — ffmpeg-рендерер и прокси-шлюз.
- * Один Docker-образ (containers/renderer), две роли:
- *  - RENDERER (standard-2: 1 vCPU, 6 GiB): монтаж Shorts + Piper TTS.
- *    Спится через 5 минут простоя — платится только за время рендера.
- *  - PROXY (basic: 1/4 vCPU, 1 GiB): fetch через per-account прокси.
- *    Спится через 10 минут простоя.
+ * Cloudflare Containers — только ffmpeg-рендерер Shorts (+ Piper TTS внутри).
+ *
+ * Один Docker-образ (containers/renderer), одна роль: RENDERER (standard-2).
+ * Спит через 5 минут простоя (scale-to-zero) — платится только за время рендера
+ * (1–2 Shorts/день ≈ пара минут CPU/день, в лимитах Paid).
+ *
+ * Прокси-контейнер НАМЕРЕННО не используется: cron сборщика бьёт каждые 5 минут,
+ * поэтому такой контейнер не засыпал бы и биллился круглосуточно. Прокси идёт
+ * напрямую через HTTP-шлюз провайдера (PROXY_GATEWAY_URL) из Worker'а.
+ *
  * Вызов: env.RENDERER.getByName("main").fetch(new Request("http://container/render", ...))
- * См. docs/COST.md — почему это укладывается в $5 Paid.
+ * См. docs/COST.md.
  */
 
 import { Container } from "@cloudflare/containers";
@@ -15,11 +19,5 @@ import type { Env } from "./env.js";
 export class RendererContainer extends Container<Env> {
   defaultPort = 8080;
   sleepAfter = "5m";
-  enableInternet = true;
-}
-
-export class ProxyContainer extends Container<Env> {
-  defaultPort = 8080;
-  sleepAfter = "10m";
   enableInternet = true;
 }
