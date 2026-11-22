@@ -1,0 +1,4 @@
+[
+  { "username": "example_en_author_1", "lang": "en", "hot": true },
+  { "username": "example_en_author_2", "lang": "en", "hot": false }
+]

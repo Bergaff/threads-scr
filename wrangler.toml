@@ -1,0 +1,52 @@
+name = "threads-digest"
+main = "src/index.ts"
+compatibility_date = "2024-11-06"
+
+# ── Cron: планировщик (раздел 4.8 ТЗ) ──────────────────────────────────────
+# Workers Cron: минимум 1 раз в минуту. Тяжёлые задачи уходят в Queue.
+[triggers]
+crons = ["*/5 * * * *", "0 6 * * *"]
+
+# ── D1 (раздел 13 ТЗ) ──────────────────────────────────────────────────────
+[[d1_databases]]
+binding = "DB"
+database_name = "threads-digest"
+database_id = "REPLACE_WITH_D1_ID_AFTER_db_create"
+migrations_dir = "src/db/migrations"
+
+# ── R2: медиафайлы, карточки, ролики (30 дней) ─────────────────────────────
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "threads-digest-media"
+
+# ── Queues: очередь задач планировщика ─────────────────────────────────────
+[[queues.producers]]
+binding = "JOBS"
+queue = "threads-digest-jobs"
+
+[[queues.consumers]]
+queue = "threads-digest-jobs"
+max_batch_size = 10
+max_batch_timeout = 30
+
+# ── Workers AI: нейросеть по умолчанию (раздел 5 ТЗ) ───────────────────────
+[ai]
+binding = "AI"
+
+# ── Переменные (секреты — только через `wrangler secret put`, см. .dev.vars.example) ──
+[vars]
+ENVIRONMENT = "production"
+SITE_URL = "https://threadsviewer.online"
+BOT_USERNAME = "threadsreaderbot"
+# Провайдеры: "workers-ai" | "openai-compatible" | "mock"
+LLM_PROVIDER = "workers-ai"
+LLM_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+TTS_PROVIDER = "mock"
+# Рендер Shorts: Workers не умеет ffmpeg — внешний рендерер (см. docs/ARCHITECTURE.md)
+VIDEO_RENDERER_URL = ""
+# Прокси-шлюз для сборщика: Workers fetch не поддерживает per-request proxy,
+# поэтому запросы идут через HTTP-шлюз с привязкой аккаунт→IP (см. docs/ARCHITECTURE.md)
+PROXY_GATEWAY_URL = ""
+
+[observability]
+enabled = true

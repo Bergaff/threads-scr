@@ -1,0 +1,77 @@
+{
+  "scoring": {
+    "replyWeight": 3,
+    "repostWeight": 4,
+    "quoteWeight": 4,
+    "ageOffsetHours": 2,
+    "ageExponent": 1.5,
+    "liftCap": 10,
+    "liftExponent": 0.5,
+    "discussWeight": 0.5,
+    "discussCap": 1,
+    "kContentWithReplies": 1.2,
+    "kContentNormal": 1.0,
+    "kContentPhotoOnly": 0.5,
+    "kContentForbidden": 0,
+    "minMedianEng": 10,
+    "topNPerLanguage": 30,
+    "candidateWindowHours": 24
+  },
+  "filters": {
+    "minTextLength": 15,
+    "blockPolitics": true,
+    "blockAdult": true,
+    "authorMaxPostsPer7d": 2,
+    "anonymizeBelowFollowers": 10000
+  },
+  "collector": {
+    "remeasureDelaysHours": [1, 3, 6, 12, 24],
+    "remeasureMaxAgeHours": 48,
+    "dropAfterLowSecondMeasure": true,
+    "feedScrollTarget": 100,
+    "dailyPageBudgetPerAccount": 400,
+    "sessionPauseMinMinutes": 10,
+    "maxPagesPerSession": 20,
+    "scrollPauseMs": [1000, 4000],
+    "cookieCheckIntervalHours": 6,
+    "backoffMinutes": [15, 60, 360],
+    "sources": {
+      "feed": { "enabled": true, "intervalMinutes": 90 },
+      "authors": { "enabled": true, "hotIntervalMinutes": 150, "coldIntervalMinutes": 1440 },
+      "search": { "enabled": true, "intervalMinutes": 240 },
+      "trending": { "enabled": true, "intervalMinutes": 90 }
+    }
+  },
+  "channels": {
+    "tg_ru": { "enabled": true, "lang": "ru", "slots": ["09:00", "13:00", "19:00", "22:00"], "timezone": "Europe/Moscow", "auto": false },
+    "tg_en": { "enabled": true, "lang": "en", "slots": ["08:00", "12:00", "18:00"], "timezone": "America/New_York", "auto": false },
+    "yt_ru": { "enabled": true, "lang": "ru", "slots": ["10:00", "20:00"], "timezone": "Europe/Moscow", "auto": false },
+    "yt_en": { "enabled": true, "lang": "en", "slots": ["09:00", "19:00"], "timezone": "America/New_York", "auto": false }
+  },
+  "shorts": {
+    "minDurationSec": 30,
+    "maxDurationSec": 60,
+    "hardMaxSec": 90,
+    "wordsPerMinute": 165,
+    "resolution": "1080x1920",
+    "fps": 30,
+    "videoCodec": "h264",
+    "videoCrf": 19,
+    "audioBitrate": "192k",
+    "audioSampleRate": 48000,
+    "loudnessLufs": -14,
+    "musicDb": -20,
+    "safeZoneTopPx": 250,
+    "safeZoneBottomPx": 420
+  },
+  "card": {
+    "width": 1080,
+    "height": 1350,
+    "theme": "dark",
+    "maxTextChars": 500
+  },
+  "stats": {
+    "weightBoostMax": 1.5,
+    "weightCutMin": 0.7
+  }
+}
