@@ -1,19 +1,17 @@
 @echo off
-chcp 65001 >nul
 cd /d "%~dp0"
 
-REM cloudflared: берём cloudflared.exe из этой папки, иначе из PATH
 set "CF_EXE=cloudflared"
 if exist cloudflared.exe set "CF_EXE=cloudflared.exe"
 where cloudflared >nul 2>nul || if not exist cloudflared.exe (
-  echo ОШИБКА: cloudflared не найден. Положи cloudflared.exe в эту папку
-  echo         (скачать: https://github.com/cloudflare/cloudflared/releases) либо установи в PATH.
+  echo ERROR: cloudflared not found. Put cloudflared.exe in this folder, or install it to PATH.
+  echo Download: https://github.com/cloudflare/cloudflared/releases
   pause && exit /b 1
 )
 
-echo Пробрасываем localhost:8080 наружу через Cloudflare Tunnel.
-echo Скопируй полученный URL (https://****.trycloudflare.com) и пропиши его в
-echo VIDEO_RENDERER_URL и PROXY_GATEWAY_URL (wrangler secret put на Клауде).
+echo Exposing localhost:8080 via Cloudflare Tunnel.
+echo Copy the URL shown below, e.g. https://XXXX.trycloudflare.com
+echo Use it for VIDEO_RENDERER_URL and PROXY_GATEWAY_URL on Cloudflare.
 echo.
 %CF_EXE% tunnel --url http://localhost:8080
 pause
