@@ -45,9 +45,8 @@ LLM_MODEL = "@cf/meta/llama-3.1-8b-instruct"
 TTS_PROVIDER = "piper"
 # Рендер Shorts и прокси НЕ в Cloudflare-контейнерах (экономим общий бюджет аккаунта):
 # это локальный сервис на ПК пользователя (см. local/), доступный Worker'у через туннель.
-# VIDEO_RENDERER_URL — ffmpeg-рендер (POST /render), PROXY_GATEWAY_URL — прокси (GET /fetch).
-VIDEO_RENDERER_URL = ""
-PROXY_GATEWAY_URL = ""
+# VIDEO_RENDERER_URL и PROXY_GATEWAY_URL — НЕ здесь: они меняются при каждом перезапуске
+# туннеля, поэтому задаются через `wrangler secret put` (см. docs/CLOUD_SETUP.md).
 R2_BUCKET = "threads-digest-media"
 
 [observability]

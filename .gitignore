@@ -11,3 +11,9 @@ assets/music/*
 !assets/backgrounds/.gitkeep
 !assets/music/.gitkeep
 seeds/private/
+
+# Локальный сервис (local/): кэш Piper/голосов и временные файлы рендера
+local/.cache/
+local/.tmp/
+**/.cache/
+**/.tmp/

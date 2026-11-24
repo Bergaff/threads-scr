@@ -3,6 +3,9 @@
 Тяжёлые задачи крутим **локально**, чтобы не тратить бюджет Cloudflare-контейнеров
 аккаунта (там уже жрёт другой проект). Worker в Клауде дёргает этот сервис по туннелю.
 
+Работает на **Windows и Linux/macOS**. На Windows запуск — **только через `.bat`-файлы**
+(см. ниже).
+
 ## Что делает
 
 - `POST /render` — монтаж Shorts: ffmpeg + Piper TTS (офлайн) + karaoke-субтитры.
@@ -12,51 +15,52 @@
   заголовка `X-Proxy-Url` (его ставит Worker из `account.proxy`).
 - `GET /health` — проверка живости.
 
-## Требования
+## Запуск на Windows (через .bat)
 
-- Node.js ≥ 20
-- **ffmpeg** в PATH (для монтажа)
-- **Piper** TTS — скачается автоматически при первом `/tts` с huggingface
-  (нужен доступ в инет). Можно поставить вручную: `pip install piper-tts` или
-  скачать бинарь с github.com/rhasspy/piper.
-- Ключи R2 (см. `.env.example`) — либо в `local/.env`, либо Worker передаёт в теле `/render`.
+Открой папку `local/` в проводнике и запускай батники двойным кликом:
 
-## Запуск
+1. **`install.bat`** — проверяет Node.js и ffmpeg в PATH, ставит npm-зависимости.
+   (Node.js скачай с https://nodejs.org, ffmpeg с https://ffmpeg.org и добавь в PATH.)
+2. **`run-all.bat`** — запускает сервер (порт 8080) и туннель cloudflared в двух окнах.
+   В окне туннеля появится URL вида `https://****.trycloudflare.com`.
+3. Скопируй этот URL и на Клауде выполни (см. `docs/CLOUD_SETUP.md`):
+   ```
+   wrangler secret put VIDEO_RENDERER_URL
+   wrangler secret put PROXY_GATEWAY_URL
+   ```
+   Вставь один и тот же URL в оба. (URL меняется при каждом перезапуске туннеля —
+   тогда повтори `wrangler secret put`.)
+
+Отдельные батники: `start.bat` (только сервер), `tunnel.bat` (только туннель).
+
+> Перед первым запуском создай `local/.env` из `local/.env.example` и впиши `R2_*`-ключи
+> (нужны рендереру для чтения/записи в R2). `start.bat` создаст `.env` автоматически,
+> если его нет, — просто допиши ключи в блокноте.
+
+Проверить живость: открой `http://localhost:8080/health` в браузере.
+
+## Запуск вручную (Linux/macOS) — опционально
 
 ```bash
 cd local
 npm install
 cp .env.example .env   # заполнить R2_*
-npm start
-# → listening on 8080
+npm start              # → listening on 8080
+cloudflared tunnel --url http://localhost:8080
 ```
 
-Проверить:
-```bash
-curl http://localhost:8080/health
-```
+## Требования
+
+- Node.js ≥ 20 (проверяется в `install.bat`)
+- **ffmpeg** в PATH (для монтажа; без него рендер упадёт)
+- **Piper** TTS — скачается **автоматически** при первом `/tts` или `/render` под твою ОС
+  (Windows/Linux/macOS) с GitHub Releases. Нужен доступ в интернет при первом запуске.
+- Ключи R2 — в `local/.env` либо Worker передаёт их в теле `/render`.
 
 ## Как Worker видит этот сервис
 
-Локальный ПК за NAT, поэтому поднимаем туннель (бесплатно):
-
-```bash
-# вариант 1: cloudflared (рекомендуется)
-cloudflared tunnel --url http://localhost:8080
-# даст, напр., https://xyz.trycloudflare.com
-
-# вариант 2: ngrok
-ngrok http 8080
-```
-
-Полученный URL прописать в `.dev.vars` (или `wrangler secret put`):
-
-```
-VIDEO_RENDERER_URL=https://xyz.trycloudflare.com
-PROXY_GATEWAY_URL=https://xyz.trycloudflare.com
-```
-
-Worker будет слать:
+Локальный ПК за NAT → поднимаем туннель (бесплатно, `cloudflared tunnel --url`).
+Worker шлёт:
 - `POST {VIDEO_RENDERER_URL}/render` — для монтажа Shorts
 - `GET  {PROXY_GATEWAY_URL}/fetch?url=...` — для сборщика через прокси
 
