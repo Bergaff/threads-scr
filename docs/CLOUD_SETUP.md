@@ -8,11 +8,8 @@
 > уже должен быть включён (нужен для cron раз в 5 мин и Queues).
 
 ## 1. D1 — база (раздел 13 ТЗ)
-```bash
-wrangler d1 create threads-digest
-```
-Скопируй `database_id` из ответа и впиши в `wrangler.toml` вместо
-`REPLACE_WITH_D1_ID_AFTER_db_create`. Затем накати миграцию (схема из `src/db/migrations/`):
+База уже создана, `database_id` прописан в `wrangler.toml` (`21e58e47-3387-45a5-a846-5345d1852033`).
+Осталось накатить миграцию (схема из `src/db/migrations/`):
 ```bash
 wrangler d1 migrations apply threads-digest --remote
 ```
@@ -45,35 +42,40 @@ wrangler deploy
 `https://threads-digest.<твой-subdomain>.workers.dev` (subdomain виден после `wrangler deploy`
 или `wrangler subdomain`); он нужен для webhook Telegram и админки.
 
-## 6. Секреты (`wrangler secret put <NAME>`)
-Не коммить их. Вводи каждый интерактивно:
-```bash
-wrangler secret put TELEGRAM_EDITOR_BOT_TOKEN
-wrangler secret put TELEGRAM_CHANNEL_BOT_TOKEN
-wrangler secret put TG_CHANNEL_RU
-wrangler secret put TG_CHANNEL_EN
-wrangler secret put ADMIN_IDS          # "123456789,987654321"
-wrangler secret put ADMIN_API_KEY
-wrangler secret put COOKIE_ENCRYPTION_KEY   # base64, 32 байта
-wrangler secret put YOUTUBE_OAUTH_TOKEN_RU
-wrangler secret put YOUTUBE_OAUTH_TOKEN_EN
-wrangler secret put R2_ACCOUNT_ID
-wrangler secret put R2_ACCESS_KEY_ID
-wrangler secret put R2_SECRET_ACCESS_KEY
-# Только если LLM_PROVIDER="openai-compatible":
-wrangler secret put OPENAI_API_KEY
-wrangler secret put OPENAI_BASE_URL
-```
+## 6. Секреты — массово одним файлом (`wrangler secret bulk`)
+Вместо поштучных `wrangler secret put` заполни один JSON и залей всё сразу.
+
+1. Скопируй шаблон и заполни значения (реальный файл называй `secrets.json`, он в `.gitignore`):
+   ```bash
+   cp secrets.example.json secrets.json
+   # открой secrets.json, впиши токены; VIDEO_RENDERER_URL и PROXY_GATEWAY_URL —
+   # туда позже вставь URL туннеля (см. шаг 7)
+   ```
+2. Залей все секреты одной командой:
+   ```bash
+   wrangler secret bulk secrets.json
+   ```
+   (Команда обновляет/создаёт все ключи из файла разом.)
+
+Список ключей в `secrets.example.json`:
+`TELEGRAM_EDITOR_BOT_TOKEN`, `TELEGRAM_CHANNEL_BOT_TOKEN`, `TG_CHANNEL_RU`, `TG_CHANNEL_EN`,
+`ADMIN_IDS`, `ADMIN_API_KEY`, `COOKIE_ENCRYPTION_KEY`, `YOUTUBE_OAUTH_TOKEN_RU`,
+`YOUTUBE_OAUTH_TOKEN_EN`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+`VIDEO_RENDERER_URL`, `PROXY_GATEWAY_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`.
+
 Переменные `ENVIRONMENT`, `SITE_URL`, `BOT_USERNAME`, `LLM_PROVIDER`, `LLM_MODEL`,
 `TTS_PROVIDER`, `R2_BUCKET` уже заданы в `[vars]` `wrangler.toml` — их менять не надо.
 
 ## 7. Туннель к локальному сервису (VIDEO_RENDERER_URL / PROXY_GATEWAY_URL)
 Локальный сервис (`local/`) доступен Worker'у только через туннель. URL туннеля
-меняется при каждом перезапуске, поэтому задаём его секретом (не в `[vars]`):
-```bash
-wrangler secret put VIDEO_RENDERER_URL   # вставь https://****.trycloudflare.com
-wrangler secret put PROXY_GATEWAY_URL    # тот же URL
-```
+меняется при каждом перезапуске.
+
+1. На ПК запусти `local/run-all.bat` — в окне туннеля появится `https://****.trycloudflare.com`.
+2. Впиши этот URL в `VIDEO_RENDERER_URL` и `PROXY_GATEWAY_URL` файла `secrets.json`
+   (на Клауде) и обнови секреты:
+   ```bash
+   wrangler secret bulk secrets.json
+   ```
 Сам туннель поднимается на ПК через `local/run-all.bat` (или `tunnel.bat`).
 
 ## 8. Telegram-бот (редактор + публикация)

@@ -11,7 +11,7 @@ crons = ["*/5 * * * *", "0 6 * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "threads-digest"
-database_id = "REPLACE_WITH_D1_ID_AFTER_db_create"
+database_id = "21e58e47-3387-45a5-a846-5345d1852033"
 migrations_dir = "src/db/migrations"
 
 # ── R2: медиафайлы, карточки, ролики (30 дней) ─────────────────────────────

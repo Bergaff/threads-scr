@@ -15,5 +15,10 @@ seeds/private/
 # Локальный сервис (local/): кэш Piper/голосов и временные файлы рендера
 local/.cache/
 local/.tmp/
+local/.npm-cache/
 **/.cache/
 **/.tmp/
+
+# Реальные секреты (заполненный файл для `wrangler secret bulk`) — не коммитить
+secrets.json
+local/secrets.json

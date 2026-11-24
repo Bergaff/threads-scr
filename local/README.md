@@ -19,19 +19,28 @@
 
 Открой папку `local/` в проводнике и запускай батники двойным кликом:
 
-1. **`install.bat`** — проверяет Node.js и ffmpeg в PATH, ставит npm-зависимости.
-   (Node.js скачай с https://nodejs.org, ffmpeg с https://ffmpeg.org и добавь в PATH.)
+1. **`install.bat`** — проверяет Node.js и ffmpeg, ставит npm-зависимости.
+   Кэш npm пишется в `local/.npm-cache` (рядом, а не на `C:\Users\...`).
 2. **`run-all.bat`** — запускает сервер (порт 8080) и туннель cloudflared в двух окнах.
    В окне туннеля появится URL вида `https://****.trycloudflare.com`.
 3. Скопируй этот URL и на Клауде выполни (см. `docs/CLOUD_SETUP.md`):
    ```
-   wrangler secret put VIDEO_RENDERER_URL
-   wrangler secret put PROXY_GATEWAY_URL
+   wrangler secret bulk secrets.json
    ```
-   Вставь один и тот же URL в оба. (URL меняется при каждом перезапуске туннеля —
-   тогда повтори `wrangler secret put`.)
+   (впиши URL в `VIDEO_RENDERER_URL` и `PROXY_GATEWAY_URL` файла `secrets.json`).
+   URL меняется при каждом перезапуске туннеля — тогда повтори `wrangler secret bulk`.
 
 Отдельные батники: `start.bat` (только сервер), `tunnel.bat` (только туннель).
+
+### Портативный режим (всё в папке `local/`, ничего лишнего на C:)
+- `node_modules`, `.npm-cache`, `.cache` (Piper+голоса), `.tmp` (рендер), `.env` —
+  создаются **внутри папки `local/`**, рядом с батниками.
+- Можно положить прямо в папку `local/`:
+  - `ffmpeg.exe` + его DLL (тогда `ffmpeg` не нужен в PATH),
+  - `cloudflared.exe` (тогда `cloudflared` не нужен в PATH).
+  Батники сначала ищут эти `.exe` в своей папке, потом в PATH.
+- Исключение: сам **Node.js** и **системный PATH** — их ставим обычно (на C:), это рантайм,
+  а не файлы проекта. Всё остальное проекта живёт в `local/`.
 
 > Перед первым запуском создай `local/.env` из `local/.env.example` и впиши `R2_*`-ключи
 > (нужны рендереру для чтения/записи в R2). `start.bat` создаст `.env` автоматически,
